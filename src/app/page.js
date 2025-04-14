@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import ScheduleGrid from '../components/ScheduleGrid'
-import LoadingBar from '../components/LoadingBar'
+import ScheduleGrid from '@/components/ScheduleGrid'
+import LoadingBar from '@/components/LoadingBar'
 import Image from 'next/image'
 import logo from '../../public/logog.jpg'
 
