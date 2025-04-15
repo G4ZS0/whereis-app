@@ -13,7 +13,13 @@ export default function HomePage() {
     const [schedule, setSchedule] = useState([])
 
     async function fetchSchedule() {
-        if (!teacher) return
+        const trimmedTeacher = teacher.trim().toUpperCase()
+
+        if (!trimmedTeacher) {
+            alert('Bitte gib ein gültiges Lehrerkürzel ein.')
+            return
+        }
+
         setLoading(true)
         setSchedule([])
 
@@ -21,22 +27,29 @@ export default function HomePage() {
             const res = await fetch('/api/teacher-schedule', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ teacher, department })
+                body: JSON.stringify({ teacher: trimmedTeacher, department })
             })
+
             const data = await res.json()
+
+            if (!res.ok) {
+                throw new Error(data.error || 'Fehler vom Server')
+            }
+
             setSchedule(data)
         } catch (error) {
             console.error('Fehler beim Laden:', error)
+            alert('Fehler beim Laden des Stundenplans.')
+        } finally {
+            setLoading(false)
         }
-
-        setLoading(false)
     }
 
     return (
         <main className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-100 text-gray-800 px-6 py-10">
             <div className="max-w-5xl mx-auto bg-white shadow-xl rounded-2xl p-10">
                 <div className="flex flex-col items-center gap-4 mb-8">
-                    <Image src={logo} alt="Logo" width={112} height={112} className="rounded-xl shadow-md" />
+                    <Image src={logo} alt="Logo" width={128} height={128} className="rounded-xl shadow-md" />
                     <h1 className="text-4xl font-extrabold text-blue-700 text-center">Lehrer-Stundenplan</h1>
                 </div>
 
@@ -47,7 +60,7 @@ export default function HomePage() {
                             className="w-full border border-gray-300 px-4 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
                             placeholder="z. B. STEI"
                             value={teacher}
-                            onChange={(e) => setTeacher(e.target.value.toUpperCase())}
+                            onChange={(e) => setTeacher(e.target.value)}
                         />
                     </div>
 
