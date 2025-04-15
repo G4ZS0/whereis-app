@@ -1,120 +1,75 @@
 // 📁 src/app/api/teacher-schedule/route.js
-
+import { NextResponse } from 'next/server'
 import { WebUntis } from 'webuntis'
 
-const departmentMap = {
-    ETI: 2,
-    MB: 3,
-    IT: 4,
-    WI: 5,
-    ET: 6
-}
-
-const PRAKTISCHE_RAUM_IDS = new Set()
-
-function getLastWeekRange() {
-    const now = new Date()
-    const day = now.getDay()
-    const diffToLastMonday = (day === 0 ? -6 : 1) - day - 7
-    const monday = new Date(now)
-    monday.setDate(now.getDate() + diffToLastMonday)
-    const friday = new Date(monday)
-    friday.setDate(monday.getDate() + 4)
-
-    const formatDate = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
-
-    return [parseInt(formatDate(monday)), parseInt(formatDate(friday))]
-}
+// Hilfsfunktion für Delay zwischen Requests (gegen 429 Fehler)
+const delay = (ms) => new Promise((res) => setTimeout(res, ms))
 
 export async function POST(req) {
-    const { teacher, department } = await req.json()
-    const isAllDepartments = department.toUpperCase() === 'ALL'
-    const mainDeptId = departmentMap[department.toUpperCase()]
+    try {
+        const body = await req.json()
+        const { teacher, department } = body
 
-    if (!isAllDepartments && !mainDeptId) {
-        return Response.json([])
-    }
+        console.log('📩 Anfrage erhalten:', { teacher, department })
 
-    const untis = new WebUntis(
-        process.env.UNTIS_SCHOOL,
-        process.env.UNTIS_USER,
-        process.env.UNTIS_PASSWORD,
-        process.env.UNTIS_URL
-    )
+        // Umgebungsvariablen prüfen
+        const school = process.env.UNTIS_SCHOOL
+        const user = process.env.UNTIS_USER
+        const password = process.env.UNTIS_PASSWORD
+        const url = process.env.UNTIS_URL
 
-    console.log('ENVs:', {
-        UNTIS_SCHOOL: process.env.UNTIS_SCHOOL,
-        UNTIS_USER: process.env.UNTIS_USER,
-        UNTIS_URL: process.env.UNTIS_URL
-    })
-    console.log('Received teacher:', req.body.teacher)
+        console.log('🌐 Verbinde mit Untis:', { school, user, url })
 
-    await untis.login()
-    const rooms = await untis.getRooms()
+        const untis = new WebUntis(school, user, password, url)
+        await untis.login()
 
-    rooms.forEach(r => {
-        const lname = (r.longName || '').toUpperCase()
-        if (lname.includes('PR') || lname.includes('PRAKT')) {
-            PRAKTISCHE_RAUM_IDS.add(r.did)
-        }
-    })
+        const rooms = await untis.getRooms()
+        console.log('📦 Räume erhalten:', rooms.length)
 
-    const departmentIds = isAllDepartments
-        ? [...new Set(rooms.map(r => r.did))]
-        : [mainDeptId, ...PRAKTISCHE_RAUM_IDS]
+        // IDs, die zur Abteilung gehören
+        const relevantRoomIds = rooms
+            .filter((room) =>
+                department === 'ALL'
+                    ? true
+                    : String(room.departmentId).includes(department)
+                    || room.name.includes(department)
+            )
+            .map((r) => r.id)
 
-    const filteredRooms = rooms.filter(r => departmentIds.includes(r.did))
-    const [start, end] = getLastWeekRange() // <--- HARD-CODED AUF LETZTE WOCHE
-    const schedule = []
+        console.log('🏢 Gefilterte Räume:', relevantRoomIds.length)
 
-    const BATCH_SIZE = 5
-    const DELAY_BETWEEN_BATCHES = 100
+        const today = new Date()
+        const weekStart = new Date(today)
+        weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7)) // Montag dieser Woche
 
-    for (let i = 0; i < filteredRooms.length; i += BATCH_SIZE) {
-        const batch = filteredRooms.slice(i, i + BATCH_SIZE)
+        const weekEnd = new Date(weekStart)
+        weekEnd.setDate(weekStart.getDate() + 6) // Sonntag
 
-        const results = await Promise.allSettled(
-            batch.map(async room => {
-                try {
-                    const response = await untis._request('getTimetable', {
-                        options: {
-                            element: { id: room.id, type: 4 },
-                            startDate: start,
-                            endDate: end,
-                            teacherFields: ['id', 'name'],
-                            subjectFields: ['name'],
-                            roomFields: ['name']
-                        }
+        const result = []
+
+        for (const roomId of relevantRoomIds) {
+            const timetable = await untis.getTimetableForRange(weekStart, weekEnd, roomId, 4)
+            await delay(250) // Schutz gegen Rate-Limit (429)
+            for (const entry of timetable) {
+                if (entry.teName === teacher) {
+                    result.push({
+                        date: entry.date,
+                        startTime: `${String(entry.startTime).padStart(4, '0').slice(0, 2)}:${String(entry.startTime).padStart(4, '0').slice(2)}`,
+                        endTime: `${String(entry.endTime).padStart(4, '0').slice(0, 2)}:${String(entry.endTime).padStart(4, '0').slice(2)}`,
+                        subject: entry.su[0]?.longname || '—',
+                        room: entry.ro[0]?.name || '—'
                     })
-
-                    return response
-                        .filter(entry =>
-                            (entry.te || []).some(t => t.name?.toUpperCase() === teacher)
-                        )
-                        .map(entry => ({
-                            date: entry.date,
-                            startTime: `${Math.floor(entry.startTime / 100)}:${String(entry.startTime % 100).padStart(2, '0')}`,
-                            endTime: `${Math.floor(entry.endTime / 100)}:${String(entry.endTime % 100).padStart(2, '0')}`,
-                            subject: entry.su?.[0]?.name || 'n/a',
-                            room: entry.ro?.[0]?.name || room.name
-                        }))
-                } catch (e) {
-                    console.warn(`Fehler bei Raum ${room.name}:`, e.message)
-                    return []
                 }
-            })
-        )
-
-        results.forEach(r => {
-            if (r.status === 'fulfilled') {
-                schedule.push(...r.value)
             }
-        })
+        }
 
-        await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES))
+        await untis.logout()
+
+        console.log('✅ Ergebnisanzahl:', result.length)
+
+        return NextResponse.json(result)
+    } catch (err) {
+        console.error('🔥 Fehler in route.js:', err)
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
     }
-
-
-    await untis.logout()
-    return Response.json(schedule)
 }
