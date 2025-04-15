@@ -42,6 +42,13 @@ export async function POST(req) {
         process.env.UNTIS_URL
     )
 
+    console.log('ENVs:', {
+        UNTIS_SCHOOL: process.env.UNTIS_SCHOOL,
+        UNTIS_USER: process.env.UNTIS_USER,
+        UNTIS_URL: process.env.UNTIS_URL
+    })
+    console.log('Received teacher:', req.body.teacher)
+
     await untis.login()
     const rooms = await untis.getRooms()
 
@@ -106,6 +113,7 @@ export async function POST(req) {
 
         await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES))
     }
+
 
     await untis.logout()
     return Response.json(schedule)
